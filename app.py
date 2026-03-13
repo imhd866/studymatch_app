@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-from model_utils import generate_recommendations
+from models_utils import generate_recommendations
 
 st.set_page_config(page_title="📚 StudyMatch", layout="centered")
 st.title("📚 StudyMatch: Academic Paper Recommender")
