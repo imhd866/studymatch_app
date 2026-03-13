@@ -35,7 +35,7 @@ def compute_groundedness(info: dict) -> str:
 # === Build ReAct Agent ===
 tools = [verify_arxiv_link, compute_groundedness]
 agent = create_agent(model=llm, tools=tools)
-agent_executor = agent.with_config({"recursion_limit": 3})
+agent_executor = agent.with_config({"recursion_limit": 100})
 
 # === Entry Function ===
 def assess_recommendations(papers_df):
