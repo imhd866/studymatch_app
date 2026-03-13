@@ -4,3 +4,6 @@ numpy
 torch
 transformers
 scikit-learn
+langchain
+groq
+requests
