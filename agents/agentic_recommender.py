@@ -1,7 +1,7 @@
 # This file replaces use of initialize_agent and AgentType with LangGraph's modern ReAct agent builder
 # It works with Python 3.14 and latest LangChain packages
 
-from langgraph.prebuilt import create_react_agent
+from langchain.agents import create_react_agent
 from langchain_core.runnables import RunnableLambda
 from langchain_core.tools import tool
 from langchain_core.messages import HumanMessage
@@ -39,7 +39,7 @@ def compute_groundedness(info: dict) -> str:
 
 # === Build ReAct Agent ===
 tools = [verify_arxiv_link, compute_groundedness]
-agent = create_react_agent(llm=llm, tools=tools)
+agent = create_react_agent(model=llm, tools=tools)
 agent_executor = agent.with_config({"recursion_limit": 3})
 
 # === Entry Function ===
