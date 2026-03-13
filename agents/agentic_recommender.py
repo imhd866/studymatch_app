@@ -43,7 +43,7 @@ def assess_recommendations(papers_df):
     for _, row in papers_df.iterrows():
         try:
             # Pass prompt inside a HumanMessage and inside a 'messages' key
-            result = agent_executor.invoke({
+            response = agent_executor.invoke({
                 "messages": [
                     HumanMessage(content=(
                         f"1. Check arXiv link for paper ID {row['id']}\n"
@@ -52,8 +52,15 @@ def assess_recommendations(papers_df):
                     ))
                 ]
             })
-            output = result.get("output", "⚠️ No response from agent")
 
+            # The LangChain LangGraph agent returns the last message object
+            if isinstance(response, list) and len(response) > 0:
+                output = response[-1].content
+            elif hasattr(response, "content"):
+                output = response.content
+            else:
+                output = "⚠️ No valid response received"
+                
         except Exception as e:
             output = f"⚠️ Agent error: {e}"
 
