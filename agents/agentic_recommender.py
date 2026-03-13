@@ -6,7 +6,7 @@ import requests
 
 # === Set up Groq LLM ===
 llm = ChatGroq(
-    groq_api_key="mgsk_wisSssOnhVs8wINvtlaCWGdyb3FY4gsgiz9xVjbI0YPGcNkpCwTd",  # <- replace with env var in production
+    groq_api_key="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",  # <- replace with env var in production
     model_name="mixtral-8x7b-32768"
 )
 
