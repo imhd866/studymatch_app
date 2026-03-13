@@ -1,17 +1,12 @@
-# This file replaces use of initialize_agent and AgentType with LangGraph's modern ReAct agent builder
-# It works with Python 3.14 and latest LangChain packages
-
 from langchain.agents import create_agent
-from langchain_core.runnables import RunnableLambda
 from langchain_core.tools import tool
 from langchain_core.messages import HumanMessage
 from langchain_groq import ChatGroq
-
 import requests
 
 # === Set up Groq LLM ===
 llm = ChatGroq(
-    groq_api_key="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",  # <- replace or use env var
+    groq_api_key="mgsk_wisSssOnhVs8wINvtlaCWGdyb3FY4gsgiz9xVjbI0YPGcNkpCwTd",  # <- replace with env var in production
     model_name="mixtral-8x7b-32768"
 )
 
@@ -46,10 +41,28 @@ agent_executor = agent.with_config({"recursion_limit": 3})
 def assess_recommendations(papers_df):
     enriched = []
     for _, row in papers_df.iterrows():
-        msg = (
-            f"1. Check arXiv link for paper ID {row['id']}\n"
-            f"2. Rate how grounded this research is:\n{row['title']}\n{row['abstract'][:500]}..."
-        )
-        result = agent_executor.invoke([HumanMessage(content=msg)])
-        enriched.append((row['id'], row['title'], result[-1].content))
+        message = {
+            "input": (
+                f"1. Check arXiv link for paper ID {row['id']}\n"
+                f"2. Rate how grounded this research is:\n{row['title']}\n{row['abstract'][:500]}..."
+            )
+        }
+
+        try:
+            result = agent_executor.invoke(message)
+            output = result.get("output", "⚠️ No response from agent")
+        except Exception as e:
+            output = f"⚠️ Agent error: {e}"
+
+        enriched.append({
+            "id": row['id'],
+            "title": row['title'],
+            "authors": row['authors'],
+            "categories": row['categories'],
+            "abstract": row['abstract'],
+            "score": row['score'],
+            "groundedness": output,
+            "link_verified": "✅" in output
+        })
+
     return enriched
