@@ -1,16 +1,16 @@
-from langchain.agents import create_agent
+# 📁 File: agents/agentic_recommender.py
+
 from langchain_core.tools import tool
-from langchain_core.messages import HumanMessage
 from langchain_groq import ChatGroq
 import requests
 
 # === Set up Groq LLM ===
 llm = ChatGroq(
-    groq_api_key="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",  # Replace with env var in production
-    model_name="openai/gpt-oss-120b"
+    groq_api_key="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",  # <- replace with environment variable in production
+    model_name="mixtral-8x7b-32768"
 )
 
-# === Define Tools ===
+# === Tool 1: Verify arXiv link ===
 @tool
 def verify_arxiv_link(paper_id: str) -> str:
     """Check if the arXiv paper link is valid and accessible."""
@@ -24,6 +24,7 @@ def verify_arxiv_link(paper_id: str) -> str:
     except Exception as e:
         return f"⚠️ Error checking {url}: {e}"
 
+# === Tool 2: Compute groundedness ===
 @tool
 def compute_groundedness(info: dict) -> str:
     """Score groundedness of a paper based on its title and abstract."""
@@ -32,47 +33,40 @@ def compute_groundedness(info: dict) -> str:
     prompt = f"Rate groundedness (0-10) and explain.\nTitle: {title}\nAbstract: {abstract}"
     return llm.invoke(prompt).content
 
-# === Build ReAct Agent ===
-tools = [verify_arxiv_link, compute_groundedness]
-agent = create_agent(model=llm, tools=tools)
-agent_executor = agent.with_config({"recursion_limit": 100})
-
-# === Entry Function ===
+# === Main enrichment function ===
 def assess_recommendations(papers_df):
+    """
+    Enhance recommended papers by verifying arXiv links and scoring groundedness.
+    Calls tools directly instead of using agent planner.
+    """
     enriched = []
     for _, row in papers_df.iterrows():
-        try:
-            # Pass prompt inside a HumanMessage and inside a 'messages' key
-            response = agent_executor.invoke({
-                "messages": [
-                    HumanMessage(content=(
-                        f"1. Check arXiv link for paper ID {row['id']}\n"
-                        f"2. Rate how grounded this research is:\n"
-                        f"{row['title']}\n{row['abstract'][:500]}..."
-                    ))
-                ]
-            })
+        paper_id = row['id']
+        title = row['title']
+        abstract = row['abstract']
 
-            # The LangChain LangGraph agent returns the last message object
-            if isinstance(response, list) and len(response) > 0:
-                output = response[-1].content
-            elif hasattr(response, "content"):
-                output = response.content
-            else:
-                output = "⚠️ No valid response received"
-                
+        try:
+            link_result = verify_arxiv_link.invoke(paper_id)
         except Exception as e:
-            output = f"⚠️ Agent error: {e}"
+            link_result = f"⚠️ Link check error: {e}"
+
+        try:
+            groundedness_result = compute_groundedness.invoke({
+                "title": title,
+                "abstract": abstract
+            })
+        except Exception as e:
+            groundedness_result = f"⚠️ Groundedness error: {e}"
 
         enriched.append({
-            "id": row['id'],
-            "title": row['title'],
+            "id": paper_id,
+            "title": title,
             "authors": row['authors'],
             "categories": row['categories'],
-            "abstract": row['abstract'],
+            "abstract": abstract,
             "score": row['score'],
-            "groundedness": output,
-            "link_verified": "✅" in output
+            "groundedness": groundedness_result,
+            "link_verified": "✅" in link_result
         })
 
     return enriched
