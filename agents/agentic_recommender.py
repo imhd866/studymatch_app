@@ -26,10 +26,8 @@ def verify_arxiv_link(paper_id: str) -> str:
 
 # === Tool 2: Compute groundedness ===
 @tool
-def compute_groundedness(info: dict) -> str:
+def compute_groundedness(title: str, abstract: str) -> str:
     """Score groundedness of a paper based on its title and abstract."""
-    title = info.get("title", "")
-    abstract = info.get("abstract", "")
     prompt = f"Rate groundedness (0-10) and explain.\nTitle: {title}\nAbstract: {abstract}"
     return llm.invoke(prompt).content
 
