@@ -57,17 +57,18 @@ def embed_text(text):
 # === Tool 1: Robust arXiv link verifier ===
 @tool
 def verify_arxiv_link(paper_id: str) -> str:
-    """Check if the arXiv paper ID is valid using the arXiv API."""
-    paper_id = re.sub(r"v\d+$", "", paper_id)
-    url = f"https://export.arxiv.org/api/query?id_list={paper_id}"
+    """Check if the arXiv paper ID is valid using the arXiv export API."""
+    base_id = re.sub(r'v\d+$', '', paper_id.strip())
+    if not re.match(r'^\d{4}\.\d{4,5}$', base_id) and not re.match(r'^[a-z\-]+\/\d{7}$', base_id):
+        return f"❌ Invalid arXiv ID format: {paper_id}"
+    url = f"https://export.arxiv.org/api/query?id_list={base_id}"
     try:
         response = requests.get(url, timeout=5)
         if response.status_code == 200 and "<entry>" in response.text:
-            return f"✅ Valid arXiv ID: {paper_id}"
-        else:
-            return f"❌ Invalid or missing arXiv ID: {paper_id}"
+            return f"✅ Valid arXiv ID: {base_id}"
+        return f"❌ Not found on arXiv: {base_id}"
     except Exception as e:
-        return f"⚠️ Error contacting arXiv API: {e}"
+        return f"⚠️ Error checking {base_id}: {e}"
 
 # === Tool 2: Groundedness scorer ===
 @tool
@@ -78,9 +79,9 @@ def compute_groundedness(title: str, abstract: str) -> str:
 
 # === Tool 3: Live paper fetcher from arXiv ===
 @tool
-def fetch_arxiv_results(query: str) -> list:
-    """Search arXiv for relevant papers and return metadata."""
-    url = f"https://export.arxiv.org/api/query?search_query=all:{query}&start=0&max_results=25"
+def fetch_arxiv_results(query: str) -> str:
+    """Search arXiv for relevant papers using the export API and return them as a formatted string."""
+    url = f"https://export.arxiv.org/api/query?search_query=all:{query}&start=0&max_results=3"
     try:
         response = requests.get(url)
         entries = ET.fromstring(response.content).findall(".//{http://www.w3.org/2005/Atom}entry")
@@ -88,30 +89,24 @@ def fetch_arxiv_results(query: str) -> list:
         for entry in entries:
             title = entry.find("{http://www.w3.org/2005/Atom}title").text.strip()
             abstract = entry.find("{http://www.w3.org/2005/Atom}summary").text.strip()
+            if not abstract:
+                continue
             arxiv_id_raw = entry.find("{http://www.w3.org/2005/Atom}id").text.split("/")[-1]
             arxiv_id = re.sub(r"v\d+$", "", arxiv_id_raw)
             authors = ", ".join(
                 author.find("{http://www.w3.org/2005/Atom}name").text
                 for author in entry.findall("{http://www.w3.org/2005/Atom}author")
             )
-            results.append({
-                "id": arxiv_id,
-                "title": title,
-                "abstract": abstract,
-                "authors": authors
-            })
-        return results
+            # Score relevance to query
+            embedding = embed_text(title + " " + abstract)
+            query_embedding = embed_text(query).reshape(1, -1)
+            score = cosine_similarity(query_embedding, embedding.reshape(1, -1))[0][0]
+            if score < 0.5:
+                continue
+            results.append(f"• {title} ({arxiv_id})\nAuthors: {authors}\nAbstract: {abstract[:300]}...\n")
+        return "\n".join(results) if results else "No papers found for that query."
     except Exception as e:
-        return [{"error": f"⚠️ Error querying arXiv API: {e}"}]
-
-# === Optional reranker ===
-def rerank_arxiv_results(query, papers, top_n=10):
-    query_embed = embed_text(query).reshape(1, -1)
-    paper_texts = [p["title"] + " " + p["abstract"] for p in papers]
-    paper_vecs = np.array([embed_text(txt) for txt in paper_texts])
-    sims = cosine_similarity(query_embed, paper_vecs).flatten()
-    top_indices = sims.argsort()[::-1][:top_n]
-    return [papers[i] | {"score": float(sims[i])} for i in top_indices]
+        return f"⚠️ Error querying arXiv API: {e}"
 
 # === Main function to assess papers ===
 def assess_recommendations(papers_df):
