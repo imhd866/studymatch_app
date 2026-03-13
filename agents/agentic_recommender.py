@@ -11,11 +11,10 @@ import hashlib
 import os
 import json
 import re
-from sklearn.metrics.pairwise import cosine_similarity
 
 # === Set up Groq LLM ===
 llm = ChatGroq(
-    groq_api_key="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",  # Replace with env var
+    groq_api_key="my_groq_api_key",  # Replace with env var
     model_name="openai/gpt-oss-120b"
 )
 
@@ -57,18 +56,16 @@ def embed_text(text):
 # === Tool 1: Robust arXiv link verifier ===
 @tool
 def verify_arxiv_link(paper_id: str) -> str:
-    """Check if the arXiv paper ID is valid using the arXiv export API."""
-    base_id = re.sub(r'v\d+$', '', paper_id.strip())
-    if not re.match(r'^\d{4}\.\d{4,5}$', base_id) and not re.match(r'^[a-z\-]+\/\d{7}$', base_id):
-        return f"❌ Invalid arXiv ID format: {paper_id}"
-    url = f"https://export.arxiv.org/api/query?id_list={base_id}"
+    """Check if the arXiv paper ID is valid using the arXiv API."""
+    url = f"https://export.arxiv.org/api/query?id_list={paper_id}"
     try:
         response = requests.get(url, timeout=5)
         if response.status_code == 200 and "<entry>" in response.text:
-            return f"✅ Valid arXiv ID: {base_id}"
-        return f"❌ Not found on arXiv: {base_id}"
+            return f"✅ Valid arXiv ID: {paper_id}"
+        else:
+            return f"❌ Invalid or missing arXiv ID: {paper_id}"
     except Exception as e:
-        return f"⚠️ Error checking {base_id}: {e}"
+        return f"⚠️ Error contacting arXiv API: {e}"
 
 # === Tool 2: Groundedness scorer ===
 @tool
@@ -83,26 +80,18 @@ def fetch_arxiv_results(query: str) -> str:
     """Search arXiv for relevant papers using the export API and return them as a formatted string."""
     url = f"https://export.arxiv.org/api/query?search_query=all:{query}&start=0&max_results=3"
     try:
-        response = requests.get(url)
+        response = requests.get(url, timeout=10)
         entries = ET.fromstring(response.content).findall(".//{http://www.w3.org/2005/Atom}entry")
         results = []
         for entry in entries:
             title = entry.find("{http://www.w3.org/2005/Atom}title").text.strip()
             abstract = entry.find("{http://www.w3.org/2005/Atom}summary").text.strip()
-            if not abstract:
-                continue
             arxiv_id_raw = entry.find("{http://www.w3.org/2005/Atom}id").text.split("/")[-1]
-            arxiv_id = re.sub(r"v\d+$", "", arxiv_id_raw)
+            arxiv_id = re.sub(r"v\d+$", "", arxiv_id_raw)  # Strip version suffix like v1
             authors = ", ".join(
                 author.find("{http://www.w3.org/2005/Atom}name").text
                 for author in entry.findall("{http://www.w3.org/2005/Atom}author")
             )
-            # Score relevance to query
-            embedding = embed_text(title + " " + abstract)
-            query_embedding = embed_text(query).reshape(1, -1)
-            score = cosine_similarity(query_embedding, embedding.reshape(1, -1))[0][0]
-            if score < 0.5:
-                continue
             results.append(f"• {title} ({arxiv_id})\nAuthors: {authors}\nAbstract: {abstract[:300]}...\n")
         return "\n".join(results) if results else "No papers found for that query."
     except Exception as e:
@@ -111,21 +100,21 @@ def fetch_arxiv_results(query: str) -> str:
 # === Main function to assess papers ===
 def assess_recommendations(papers_df):
     enriched = []
+    if papers_df.empty:
+        return []
+
     for _, row in papers_df.iterrows():
         paper_id = row['id']
         title = row['title']
         abstract = row['abstract']
 
         try:
-            link_result = verify_arxiv_link.invoke(paper_id)
+            link_result = verify_arxiv_link(paper_id=paper_id)
         except Exception as e:
             link_result = f"⚠️ Link check error: {e}"
 
         try:
-            groundedness_result = compute_groundedness.invoke({
-                "title": title,
-                "abstract": abstract
-            })
+            groundedness_result = compute_groundedness(title=title, abstract=abstract)
         except Exception as e:
             groundedness_result = f"⚠️ Groundedness error: {e}"
 
