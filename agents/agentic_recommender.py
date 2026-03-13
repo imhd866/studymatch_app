@@ -1,17 +1,21 @@
-from langchain.agents import initialize_agent, Tool
-from langchain.chat_models import ChatGroq
-from langchain.agents import AgentType
-from langchain.tools import tool
-import requests
-import re
+# This file replaces use of initialize_agent and AgentType with LangGraph's modern ReAct agent builder
+# It works with Python 3.14 and latest LangChain packages
 
-# === Agent LLM ===
+from langgraph.prebuilt import create_react_agent
+from langchain_core.runnables import RunnableLambda
+from langchain_core.tools import tool
+from langchain_core.messages import HumanMessage
+from langchain_groq import ChatGroq
+
+import requests
+
+# === Set up Groq LLM ===
 llm = ChatGroq(
-    groq_api_key="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",  # replace with your actual key or set as env var
+    groq_api_key="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",  # <- replace or use env var
     model_name="mixtral-8x7b-32768"
 )
 
-# === Tool 1: Link Verifier ===
+# === Define Tools ===
 @tool
 def verify_arxiv_link(paper_id: str) -> str:
     """Check if the arXiv paper link is valid and accessible."""
@@ -25,25 +29,27 @@ def verify_arxiv_link(paper_id: str) -> str:
     except Exception as e:
         return f"⚠️ Error checking {url}: {e}"
 
-# === Tool 2: Groundedness Checker ===
 @tool
-def compute_groundedness(title: str, abstract: str) -> str:
-    """Compute a groundedness score using the LLM's reasoning on title + abstract."""
-    prompt = f"Rate how grounded the following abstract is in real, measurable research (0-10), and explain why.\n\nTitle: {title}\nAbstract: {abstract}"
-    return llm.predict(prompt)
+def compute_groundedness(info: dict) -> str:
+    """Score groundedness of a paper based on its title and abstract."""
+    title = info.get("title", "")
+    abstract = info.get("abstract", "")
+    prompt = f"Rate groundedness (0-10) and explain.\nTitle: {title}\nAbstract: {abstract}"
+    return llm.invoke(prompt).content
 
-# === Agent Setup ===
-agent = initialize_agent(
-    tools=[verify_arxiv_link, compute_groundedness],
-    llm=llm,
-    agent=AgentType.OPENAI_FUNCTIONS,
-    verbose=True
-)
+# === Build ReAct Agent ===
+tools = [verify_arxiv_link, compute_groundedness]
+agent = create_react_agent(llm=llm, tools=tools)
+agent_executor = agent.with_config({"recursion_limit": 3})
 
-# === Entry point ===
+# === Entry Function ===
 def assess_recommendations(papers_df):
     enriched = []
     for _, row in papers_df.iterrows():
-        result = agent.run(f"Check link for paper ID {row['id']}. Then analyze groundedness of: '{row['title']}'\n\n{row['abstract'][:400]}...")
-        enriched.append((row['id'], row['title'], result))
+        msg = (
+            f"1. Check arXiv link for paper ID {row['id']}\n"
+            f"2. Rate how grounded this research is:\n{row['title']}\n{row['abstract'][:500]}..."
+        )
+        result = agent_executor.invoke([HumanMessage(content=msg)])
+        enriched.append((row['id'], row['title'], result[-1].content))
     return enriched
