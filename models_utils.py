@@ -1,9 +1,12 @@
 import numpy as np
+import json
+import os
 import pandas as pd
 import torch
 from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.feature_extraction.text import TfidfVectorizer
 from transformers import AutoTokenizer, AutoModel
+from agents.agentic_recommender import fetch_arxiv_results, embed_text
 
 MODEL_NAME = "allenai/specter2_base"
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -71,3 +74,51 @@ def generate_recommendations(query, df, embeddings, top_n=TOP_N):
     diversified = mmr_diversify(q_embed, candidate_vecs, top_k=top_n)
     final_indices = [top_indices[i] for i in diversified]
     return df.iloc[final_indices].assign(score=sims[final_indices])
+
+def augment_with_live_arxiv(query, df_static, embeddings_static, top_n=10, cache_path="embedding_cache.json"):
+    # Load or create embedding cache
+    if os.path.exists(cache_path):
+        with open(cache_path, "r", encoding="utf-8") as f:
+            cache = json.load(f)
+    else:
+        cache = {}
+
+    # Step 1: Fetch fresh papers from arXiv
+    new_papers = fetch_arxiv_results(query)
+    new_rows = []
+    new_embeddings = []
+
+    for paper in new_papers:
+        if paper["id"] not in cache:
+            embed = embed_text(paper["title"] + " " + paper["abstract"]).tolist()
+            cache[paper["id"]] = {
+                "embedding": embed,
+                "title": paper["title"],
+                "abstract": paper["abstract"],
+                "authors": paper.get("authors", "Unknown"),
+                "categories": paper.get("categories", "N/A")
+            }
+
+        # Create row for the combined DataFrame
+        cached = cache[paper["id"]]
+        new_rows.append({
+            "id": paper["id"],
+            "title": cached["title"],
+            "abstract": cached["abstract"],
+            "authors": cached["authors"],
+            "categories": cached["categories"]
+        })
+        new_embeddings.append(np.array(cache[paper["id"]]["embedding"]))
+
+    # Save updated cache
+    with open(cache_path, "w", encoding="utf-8") as f:
+        json.dump(cache, f)
+
+    # Combine static and dynamic sources
+    df_live = pd.DataFrame(new_rows)
+    df_combined = pd.concat([df_static, df_live], ignore_index=True)
+    embeddings_live = np.array(new_embeddings)
+    all_embeddings = np.vstack([embeddings_static, embeddings_live]) if embeddings_live.size else embeddings_static
+
+    # Generate new recommendations
+    return generate_recommendations(query, df_combined, all_embeddings, top_n=top_n)

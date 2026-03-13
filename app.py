@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 from models_utils import generate_recommendations
+from models_utils import augment_with_live_arxiv
 from agents.agentic_recommender import assess_recommendations
 
 st.set_page_config(page_title="\U0001F4DA StudyMatch", layout="centered")
@@ -15,7 +16,7 @@ if st.button("Get Recommendations") and query.strip():
         try:
             df = pd.read_csv("data/cleaned_arxiv_subset.csv")
             embeddings = np.load("data/specter_embeddings.npz")["embeddings"]
-            results = generate_recommendations(query, df, embeddings)
+            results = augment_with_live_arxiv(query, df, embeddings)
 
             # Call agentic pipeline
             enriched_results = assess_recommendations(results)
