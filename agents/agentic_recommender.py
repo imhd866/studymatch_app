@@ -6,7 +6,7 @@ import requests
 
 # === Set up Groq LLM ===
 llm = ChatGroq(
-    groq_api_key="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",  # <- replace with env var in production
+    groq_api_key="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",  # Replace with env var in production
     model_name="mixtral-8x7b-32768"
 )
 
@@ -41,16 +41,19 @@ agent_executor = agent.with_config({"recursion_limit": 3})
 def assess_recommendations(papers_df):
     enriched = []
     for _, row in papers_df.iterrows():
-        message = {
-            "input": (
-                f"1. Check arXiv link for paper ID {row['id']}\n"
-                f"2. Rate how grounded this research is:\n{row['title']}\n{row['abstract'][:500]}..."
-            )
-        }
-
         try:
-            result = agent_executor.invoke(message)
+            # Pass prompt inside a HumanMessage and inside a 'messages' key
+            result = agent_executor.invoke({
+                "messages": [
+                    HumanMessage(content=(
+                        f"1. Check arXiv link for paper ID {row['id']}\n"
+                        f"2. Rate how grounded this research is:\n"
+                        f"{row['title']}\n{row['abstract'][:500]}..."
+                    ))
+                ]
+            })
             output = result.get("output", "⚠️ No response from agent")
+
         except Exception as e:
             output = f"⚠️ Agent error: {e}"
 
