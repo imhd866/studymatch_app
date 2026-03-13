@@ -5,24 +5,11 @@ import pandas as pd
 import torch
 from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.feature_extraction.text import TfidfVectorizer
-from transformers import AutoTokenizer, AutoModel
 from agents.agentic_recommender import fetch_arxiv_results, embed_text
-
-MODEL_NAME = "allenai/specter2_base"
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
-model = AutoModel.from_pretrained(MODEL_NAME).to(DEVICE)
-model.eval()
 
 KEYWORDS = ['spiking', 'neuromorphic', 'Josephson', 'superconduct', 'quantum', 'edge']
 TOP_N = 10
 
-def embed_text(text):
-    inputs = tokenizer(text, return_tensors="pt", padding=True, truncation=True, max_length=512)
-    inputs = {k: v.to(DEVICE) for k, v in inputs.items()}
-    with torch.no_grad():
-        return model(**inputs).last_hidden_state[:, 0, :].squeeze().cpu().numpy()
 
 def expand_query(query_text, df, embeddings, top_n=10, max_terms=5):
     q_vec = embed_text(query_text).reshape(1, -1)
@@ -34,6 +21,7 @@ def expand_query(query_text, df, embeddings, top_n=10, max_terms=5):
     keywords = tfidf.get_feature_names_out()[:max_terms]
     return query_text + " " + " ".join(keywords), q_vec
 
+
 def rerank(results, scores):
     reranked = []
     for idx, (_, row) in enumerate(results.iterrows()):
@@ -41,6 +29,7 @@ def rerank(results, scores):
         reranked.append((idx, scores[idx] + 0.01 * bonus))
     reranked.sort(key=lambda x: x[1], reverse=True)
     return [i for i, _ in reranked]
+
 
 def mmr_diversify(query_vec, candidate_vecs, top_k=10, lambda_param=0.7):
     selected = []
@@ -63,6 +52,7 @@ def mmr_diversify(query_vec, candidate_vecs, top_k=10, lambda_param=0.7):
         remaining.remove(next_doc)
     return selected
 
+
 def generate_recommendations(query, df, embeddings, top_n=TOP_N):
     df = df.reset_index(drop=True)
     expanded, q_vec = expand_query(query, df, embeddings)
@@ -75,18 +65,19 @@ def generate_recommendations(query, df, embeddings, top_n=TOP_N):
     final_indices = [top_indices[i] for i in diversified]
     return df.iloc[final_indices].assign(score=sims[final_indices])
 
+
 def augment_with_live_arxiv(query, df_static, embeddings_static, top_n=10, cache_path="embedding_cache.json"):
-    # Load or create embedding cache
     if os.path.exists(cache_path):
         with open(cache_path, "r", encoding="utf-8") as f:
             cache = json.load(f)
     else:
         cache = {}
 
-    # Step 1: Fetch fresh papers from arXiv
-    new_papers = fetch_arxiv_results(query)
-    new_rows = []
-    new_embeddings = []
+    new_papers = fetch_arxiv_results.invoke(query)
+    new_rows, new_embeddings = [], []
+
+    if isinstance(new_papers, str):  # if error string returned
+        return generate_recommendations(query, df_static, embeddings_static, top_n)
 
     for paper in new_papers:
         if paper["id"] not in cache:
@@ -99,7 +90,6 @@ def augment_with_live_arxiv(query, df_static, embeddings_static, top_n=10, cache
                 "categories": paper.get("categories", "N/A")
             }
 
-        # Create row for the combined DataFrame
         cached = cache[paper["id"]]
         new_rows.append({
             "id": paper["id"],
@@ -108,17 +98,14 @@ def augment_with_live_arxiv(query, df_static, embeddings_static, top_n=10, cache
             "authors": cached["authors"],
             "categories": cached["categories"]
         })
-        new_embeddings.append(np.array(cache[paper["id"]]["embedding"]))
+        new_embeddings.append(np.array(cached["embedding"]))
 
-    # Save updated cache
     with open(cache_path, "w", encoding="utf-8") as f:
         json.dump(cache, f)
 
-    # Combine static and dynamic sources
     df_live = pd.DataFrame(new_rows)
     df_combined = pd.concat([df_static, df_live], ignore_index=True)
     embeddings_live = np.array(new_embeddings)
     all_embeddings = np.vstack([embeddings_static, embeddings_live]) if embeddings_live.size else embeddings_static
 
-    # Generate new recommendations
     return generate_recommendations(query, df_combined, all_embeddings, top_n=top_n)
