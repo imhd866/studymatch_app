@@ -7,7 +7,7 @@ import requests
 # === Set up Groq LLM ===
 llm = ChatGroq(
     groq_api_key="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",  # <- replace with environment variable in production
-    model_name="mixtral-8x7b-32768"
+    model_name="openai/gpt-oss-120b"
 )
 
 # === Tool 1: Verify arXiv link ===
