@@ -110,7 +110,10 @@ def assess_recommendations(papers_df):
             link_result = f"⚠️ Link check error: {e}"
 
         try:
-            groundedness_result = compute_groundedness.invoke(title=title, abstract=abstract)
+            groundedness_result = compute_groundedness.invoke({
+                "title": title,
+                "abstract": abstract
+            })
         except Exception as e:
             groundedness_result = f"⚠️ Groundedness error: {e}"
 
