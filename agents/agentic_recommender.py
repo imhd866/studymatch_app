@@ -13,7 +13,7 @@ import json
 
 # === Set up Groq LLM ===
 llm = ChatGroq(
-    groq_api_key="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",  # Replace with env var in prod
+    groq_api_key="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",  # Replace with env var in production
     model_name="openai/gpt-oss-120b"
 )
 
@@ -62,13 +62,14 @@ def verify_arxiv_link(paper_id: str) -> str:
 # === Tool 2: Groundedness scorer ===
 @tool
 def compute_groundedness(title: str, abstract: str) -> str:
+    """Score groundedness of a paper based on its title and abstract."""
     prompt = f"Rate groundedness (0–10) and explain in bullet points.\nTitle: {title}\nAbstract: {abstract}"
     return llm.invoke(prompt).content
 
 # === Tool 3: Live paper fetcher from arXiv ===
 @tool
 def fetch_arxiv_results(query: str) -> list:
-    """Search arXiv for relevant papers using the export API."""
+    """Search arXiv for relevant papers using the export API and return title, abstract, id, authors."""
     url = f"https://export.arxiv.org/api/query?search_query=all:{query}&start=0&max_results=3"
     try:
         response = requests.get(url)
@@ -79,13 +80,22 @@ def fetch_arxiv_results(query: str) -> list:
             abstract = entry.find("{http://www.w3.org/2005/Atom}summary").text.strip()
             arxiv_id = entry.find("{http://www.w3.org/2005/Atom}id").text.split("/")[-1]
             authors = ", ".join(author.find("{http://www.w3.org/2005/Atom}name").text for author in entry.findall("{http://www.w3.org/2005/Atom}author"))
-            results.append({"id": arxiv_id, "title": title, "abstract": abstract, "authors": authors})
+            results.append({
+                "id": arxiv_id,
+                "title": title,
+                "abstract": abstract,
+                "authors": authors
+            })
         return results
     except Exception as e:
         return [f"⚠️ Error querying arXiv API: {e}"]
 
 # === Main function to assess papers ===
 def assess_recommendations(papers_df):
+    """
+    Enhance recommended papers by verifying arXiv links and scoring groundedness.
+    Tools are invoked directly without agents for speed.
+    """
     enriched = []
     for _, row in papers_df.iterrows():
         paper_id = row['id']
@@ -98,7 +108,10 @@ def assess_recommendations(papers_df):
             link_result = f"⚠️ Link check error: {e}"
 
         try:
-            groundedness_result = compute_groundedness.invoke({"title": title, "abstract": abstract})
+            groundedness_result = compute_groundedness.invoke({
+                "title": title,
+                "abstract": abstract
+            })
         except Exception as e:
             groundedness_result = f"⚠️ Groundedness error: {e}"
 
