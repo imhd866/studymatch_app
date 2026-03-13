@@ -5,5 +5,6 @@ torch
 transformers
 scikit-learn
 langchain
+langchain_groq
 groq
 requests
