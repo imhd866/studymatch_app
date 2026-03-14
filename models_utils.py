@@ -1,4 +1,4 @@
-# ✅ Refactored models_utils.py for StudyMatch
+# ✅ Refactored models_utils.py for StudyMatch (non-agentic tools)
 
 import numpy as np
 import json
@@ -12,7 +12,6 @@ from agents.agentic_recommender import fetch_arxiv_results, embed_text
 KEYWORDS = ['spiking', 'neuromorphic', 'Josephson', 'superconduct', 'quantum', 'edge']
 TOP_N = 10
 
-
 def expand_query(query_text, df, embeddings, top_n=10, max_terms=5):
     q_vec = embed_text(query_text).reshape(1, -1)
     sims = cosine_similarity(q_vec, embeddings)[0]
@@ -23,7 +22,6 @@ def expand_query(query_text, df, embeddings, top_n=10, max_terms=5):
     keywords = tfidf.get_feature_names_out()[:max_terms]
     return query_text + " " + " ".join(keywords), q_vec
 
-
 def rerank(results, scores):
     reranked = []
     for idx, (_, row) in enumerate(results.iterrows()):
@@ -31,7 +29,6 @@ def rerank(results, scores):
         reranked.append((idx, scores[idx] + 0.01 * bonus))
     reranked.sort(key=lambda x: x[1], reverse=True)
     return [i for i, _ in reranked]
-
 
 def mmr_diversify(query_vec, candidate_vecs, top_k=10, lambda_param=0.7):
     selected = []
@@ -54,7 +51,6 @@ def mmr_diversify(query_vec, candidate_vecs, top_k=10, lambda_param=0.7):
         remaining.remove(next_doc)
     return selected
 
-
 def generate_recommendations(query, df, embeddings, top_n=TOP_N):
     df = df.reset_index(drop=True)
     expanded, q_vec = expand_query(query, df, embeddings)
@@ -67,7 +63,6 @@ def generate_recommendations(query, df, embeddings, top_n=TOP_N):
     final_indices = [top_indices[i] for i in diversified]
     return df.iloc[final_indices].assign(score=sims[final_indices])
 
-
 def augment_with_live_arxiv(query, df_static, embeddings_static, top_n=10, cache_path="embedding_cache.json"):
     if os.path.exists(cache_path):
         with open(cache_path, "r", encoding="utf-8") as f:
@@ -75,7 +70,7 @@ def augment_with_live_arxiv(query, df_static, embeddings_static, top_n=10, cache
     else:
         cache = {}
 
-    new_papers = fetch_arxiv_results.invoke({"query": query})
+    new_papers = fetch_arxiv_results(query)
     if not isinstance(new_papers, list):
         return df_static
 

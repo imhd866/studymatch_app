@@ -1,4 +1,4 @@
-# agentic_recommender.py
+# ✅ Finalized agentic_recommender.py (non-agentic version, fixed tool calls)
 
 from langchain_core.tools import tool
 from langchain_groq import ChatGroq
@@ -12,17 +12,20 @@ import os
 import json
 import re
 
+# === Set up Groq LLM ===
 llm = ChatGroq(
-    groq_api_key="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",  # Replace with os.getenv in prod
+    groq_api_key="my_groq_api_key",  # Replace with os.getenv in prod
     model_name="openai/gpt-oss-120b"
 )
 
+# === Set up local embedding model ===
 MODEL_NAME = "allenai/specter2_base"
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
 model = AutoModel.from_pretrained(MODEL_NAME).to(DEVICE)
 model.eval()
 
+# === Embedding Cache ===
 CACHE_PATH = "data/embedding_cache.json"
 MAX_CACHE_ENTRIES = 5000
 if os.path.exists(CACHE_PATH):
@@ -50,9 +53,8 @@ def embed_text(text):
         json.dump(embedding_cache, f)
     return emb
 
-@tool
+# === Tool 1: Robust arXiv link verifier ===
 def verify_arxiv_link(paper_id: str) -> str:
-    """Check if the arXiv paper ID is valid using the arXiv API."""
     url = f"https://export.arxiv.org/api/query?id_list={paper_id}"
     try:
         response = requests.get(url, timeout=5)
@@ -62,15 +64,13 @@ def verify_arxiv_link(paper_id: str) -> str:
     except Exception as e:
         return f"⚠️ Error contacting arXiv API: {e}"
 
-@tool
+# === Tool 2: Groundedness scorer ===
 def compute_groundedness(title: str, abstract: str) -> str:
-    """Score groundedness of a paper based on its title and abstract."""
     prompt = f"Rate groundedness (0–10) and explain in bullet points.\nTitle: {title}\nAbstract: {abstract}"
     return llm.invoke(prompt).content
 
-@tool
+# === Tool 3: Live paper fetcher from arXiv ===
 def fetch_arxiv_results(query: str) -> list:
-    """Search arXiv for relevant papers and return structured entries."""
     url = f"https://export.arxiv.org/api/query?search_query=all:{query}&start=0&max_results=5"
     try:
         response = requests.get(url, timeout=10)
@@ -94,6 +94,7 @@ def fetch_arxiv_results(query: str) -> list:
     except Exception as e:
         return [{"error": f"⚠️ Error querying arXiv API: {e}"}]
 
+# === Main function to assess papers ===
 def assess_recommendations(papers_df):
     enriched = []
     for _, row in papers_df.iterrows():
@@ -102,12 +103,12 @@ def assess_recommendations(papers_df):
         abstract = row["abstract"]
 
         try:
-            link_result = verify_arxiv_link.invoke({"paper_id": paper_id})
+            link_result = verify_arxiv_link(paper_id)
         except Exception as e:
             link_result = f"⚠️ Link check error: {e}"
 
         try:
-            groundedness_result = compute_groundedness.invoke({"title": title, "abstract": abstract})
+            groundedness_result = compute_groundedness(title, abstract)
         except Exception as e:
             groundedness_result = f"⚠️ Groundedness error: {e}"
 
