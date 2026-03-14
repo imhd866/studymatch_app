@@ -14,7 +14,7 @@ import re
 
 # === Set up Groq LLM ===
 llm = ChatGroq(
-    groq_api_key="my_groq_api_key",  # Replace with env var
+    groq_api_key="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",  # Replace with env var
     model_name="openai/gpt-oss-120b"
 )
 
