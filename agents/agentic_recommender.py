@@ -12,10 +12,8 @@ from dotenv import load_dotenv
 from langchain_groq import ChatGroq
 from transformers import AutoModel, AutoTokenizer
 
-load_dotenv()
+load_dotenv(override=True)
 
-GROQ_API_KEY = os.getenv("STUDYMATCH_GROQ_API_KEY")
-GROQ_MODEL_NAME = os.getenv("STUDYMATCH_GROQ_MODEL", "llama-3.3-70b-versatile")
 MODEL_NAME = "allenai/specter2_base"
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 CACHE_PATH = Path("data/embedding_cache.json")
@@ -33,9 +31,13 @@ else:
 
 
 def get_llm():
-    if not GROQ_API_KEY:
+    # Re-read on each call so Streamlit restarts and env changes are picked up.
+    groq_api_key = (os.getenv("STUDYMATCH_GROQ_API_KEY") or "").strip().strip("\"'")
+    groq_model_name = (os.getenv("STUDYMATCH_GROQ_MODEL") or "llama-3.3-70b-versatile").strip()
+
+    if not groq_api_key:
         return None
-    return ChatGroq(groq_api_key=GROQ_API_KEY, model_name=GROQ_MODEL_NAME)
+    return ChatGroq(groq_api_key=groq_api_key, model_name=groq_model_name)
 
 
 def normalize(text):
@@ -85,7 +87,16 @@ def compute_groundedness(title, abstract):
         f"Title: {title}\n"
         f"Abstract: {abstract}"
     )
-    return llm.invoke(prompt).content
+    try:
+        return llm.invoke(prompt).content
+    except Exception as exc:
+        if "invalid_api_key" in str(exc) or "Invalid API Key" in str(exc):
+            return (
+                "Groundedness check failed: the Groq API key loaded by the app is invalid. "
+                "If you are running a deployed Streamlit app, update the secret in Streamlit's app settings; "
+                "a local .env file will not override cloud secrets."
+            )
+        raise
 
 
 def fetch_arxiv_results(query):
