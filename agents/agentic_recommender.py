@@ -80,7 +80,7 @@ def verify_arxiv_link(paper_id):
 def compute_groundedness(title, abstract):
     llm = get_llm()
     if llm is None:
-        return "Skipped: set STUDYMATCH_GROQ_API_KEY to enable groundedness scoring."
+        return None
 
     prompt = (
         "Rate the groundedness of this paper from 0 to 10 and explain your reasoning in short bullets.\n"
