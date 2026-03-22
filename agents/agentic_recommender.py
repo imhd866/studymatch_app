@@ -1,79 +1,101 @@
-# ✅ Finalized agentic_recommender.py (non-agentic version, fixed tool calls)
-
-from langchain_core.tools import tool
-from langchain_groq import ChatGroq
-import requests
-import xml.etree.ElementTree as ET
-from transformers import AutoTokenizer, AutoModel
-import torch
-import numpy as np
 import hashlib
-import os
 import json
+import os
 import re
+import xml.etree.ElementTree as ET
+from pathlib import Path
 
-# === Set up Groq LLM ===
-llm = ChatGroq(
-    groq_api_key="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",  # Replace with os.getenv in prod
-    model_name="openai/gpt-oss-120b"
-)
+import numpy as np
+import requests
+import torch
+from dotenv import load_dotenv
+from langchain_groq import ChatGroq
+from transformers import AutoModel, AutoTokenizer
 
-# === Set up local embedding model ===
+load_dotenv()
+
+GROQ_API_KEY = os.getenv("STUDYMATCH_GROQ_API_KEY")
+GROQ_MODEL_NAME = os.getenv("STUDYMATCH_GROQ_MODEL", "llama-3.3-70b-versatile")
 MODEL_NAME = "allenai/specter2_base"
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+CACHE_PATH = Path("data/embedding_cache.json")
+MAX_CACHE_ENTRIES = 5000
+
 tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
 model = AutoModel.from_pretrained(MODEL_NAME).to(DEVICE)
 model.eval()
 
-# === Embedding Cache ===
-CACHE_PATH = "data/embedding_cache.json"
-MAX_CACHE_ENTRIES = 5000
 if os.path.exists(CACHE_PATH):
-    with open(CACHE_PATH, "r", encoding="utf-8") as f:
-        embedding_cache = json.load(f)
+    with open(CACHE_PATH, "r", encoding="utf-8") as file_handle:
+        embedding_cache = json.load(file_handle)
 else:
     embedding_cache = {}
 
+
+def get_llm():
+    if not GROQ_API_KEY:
+        return None
+    return ChatGroq(groq_api_key=GROQ_API_KEY, model_name=GROQ_MODEL_NAME)
+
+
 def normalize(text):
     return re.sub(r"\s+", " ", text.replace("\n", " ")).strip()
+
 
 def embed_text(text):
     text = normalize(text)
     key = hashlib.md5(text.encode()).hexdigest()
     if key in embedding_cache:
         return np.array(embedding_cache[key])
+
     inputs = tokenizer(text, return_tensors="pt", padding=True, truncation=True, max_length=512)
-    inputs = {k: v.to(DEVICE) for k, v in inputs.items()}
+    inputs = {name: tensor.to(DEVICE) for name, tensor in inputs.items()}
     with torch.no_grad():
-        emb = model(**inputs).last_hidden_state[:, 0, :].squeeze().cpu().numpy()
-    embedding_cache[key] = emb.tolist()
+        embedding = model(**inputs).last_hidden_state[:, 0, :].squeeze().cpu().numpy()
+
+    embedding_cache[key] = embedding.tolist()
     if len(embedding_cache) > MAX_CACHE_ENTRIES:
         embedding_cache.pop(next(iter(embedding_cache)))
-    with open(CACHE_PATH, "w", encoding="utf-8") as f:
-        json.dump(embedding_cache, f)
-    return emb
+    with open(CACHE_PATH, "w", encoding="utf-8") as file_handle:
+        json.dump(embedding_cache, file_handle)
 
-# === Tool 1: Robust arXiv link verifier ===
-def verify_arxiv_link(paper_id: str) -> str:
-    url = f"https://export.arxiv.org/api/query?id_list={paper_id}"
+    return embedding
+
+
+def verify_arxiv_link(paper_id):
     try:
-        response = requests.get(url, timeout=5)
-        if response.status_code == 200 and "<entry>" in response.text:
-            return f"✅ Valid arXiv ID: {paper_id}"
-        return f"❌ Invalid or missing arXiv ID: {paper_id}"
-    except Exception as e:
-        return f"⚠️ Error contacting arXiv API: {e}"
+        response = requests.get(
+            "https://export.arxiv.org/api/query",
+            params={"id_list": paper_id},
+            timeout=5,
+        )
+        response.raise_for_status()
+        return "<entry>" in response.text
+    except requests.RequestException:
+        return False
 
-# === Tool 2: Groundedness scorer ===
-def compute_groundedness(title: str, abstract: str) -> str:
-    prompt = f"Rate groundedness (0–10) and explain in bullet points.\nTitle: {title}\nAbstract: {abstract}"
+
+def compute_groundedness(title, abstract):
+    llm = get_llm()
+    if llm is None:
+        return "Skipped: set STUDYMATCH_GROQ_API_KEY to enable groundedness scoring."
+
+    prompt = (
+        "Rate the groundedness of this paper from 0 to 10 and explain your reasoning in short bullets.\n"
+        f"Title: {title}\n"
+        f"Abstract: {abstract}"
+    )
     return llm.invoke(prompt).content
 
-# === Tool 3: Live paper fetcher from arXiv ===
-def fetch_arxiv_results(query: str) -> list:
-    url = f"https://export.arxiv.org/api/query?search_query=all:{query}&start=0&max_results=5"
+
+def fetch_arxiv_results(query):
     try:
-        response = requests.get(url, timeout=10)
+        response = requests.get(
+            "https://export.arxiv.org/api/query",
+            params={"search_query": f"all:{query}", "start": 0, "max_results": 5},
+            timeout=10,
+        )
+        response.raise_for_status()
         entries = ET.fromstring(response.content).findall(".//{http://www.w3.org/2005/Atom}entry")
         results = []
         for entry in entries:
@@ -84,17 +106,24 @@ def fetch_arxiv_results(query: str) -> list:
                 author.find("{http://www.w3.org/2005/Atom}name").text
                 for author in entry.findall("{http://www.w3.org/2005/Atom}author")
             )
-            results.append({
-                "id": re.sub(r"v\d+$", "", arxiv_id),
-                "title": title,
-                "abstract": abstract,
-                "authors": authors
-            })
+            categories = " ".join(
+                category.attrib.get("term", "")
+                for category in entry.findall("{http://arxiv.org/schemas/atom}primary_category")
+            ).strip() or "N/A"
+            results.append(
+                {
+                    "id": re.sub(r"v\d+$", "", arxiv_id),
+                    "title": title,
+                    "abstract": abstract,
+                    "authors": authors,
+                    "categories": categories,
+                }
+            )
         return results
-    except Exception as e:
-        return [{"error": f"⚠️ Error querying arXiv API: {e}"}]
+    except (requests.RequestException, ET.ParseError) as exc:
+        return [{"error": f"Error querying arXiv API: {exc}"}]
 
-# === Main function to assess papers ===
+
 def assess_recommendations(papers_df):
     enriched = []
     for _, row in papers_df.iterrows():
@@ -104,23 +133,25 @@ def assess_recommendations(papers_df):
 
         try:
             link_result = verify_arxiv_link(paper_id)
-        except Exception as e:
-            link_result = f"⚠️ Link check error: {e}"
+        except Exception:
+            link_result = False
 
         try:
             groundedness_result = compute_groundedness(title, abstract)
-        except Exception as e:
-            groundedness_result = f"⚠️ Groundedness error: {e}"
+        except Exception as exc:
+            groundedness_result = f"Groundedness check failed: {exc}"
 
-        enriched.append({
-            "id": paper_id,
-            "title": title,
-            "authors": row.get("authors", ""),
-            "categories": row.get("categories", ""),
-            "abstract": abstract,
-            "score": row.get("score", 0),
-            "groundedness": groundedness_result,
-            "link_verified": "✅" in link_result
-        })
+        enriched.append(
+            {
+                "id": paper_id,
+                "title": title,
+                "authors": row.get("authors", ""),
+                "categories": row.get("categories", ""),
+                "abstract": abstract,
+                "score": row.get("score", 0),
+                "groundedness": groundedness_result,
+                "link_verified": link_result,
+            }
+        )
 
     return enriched

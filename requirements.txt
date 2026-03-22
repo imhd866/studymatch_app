@@ -8,3 +8,4 @@ langchain
 langchain_groq
 groq
 requests
+python-dotenv
