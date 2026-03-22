@@ -61,7 +61,11 @@ def render_results(results):
 
     st.success(f"Found {len(results)} recommendations.")
     for paper in results:
-        st.markdown(f"**[{paper['title']}](https://arxiv.org/abs/{paper['id']})**")
+        resolved_url = paper.get("resolved_url")
+        if resolved_url and paper.get("link_verified"):
+            st.markdown(f"**[{paper['title']}]({resolved_url})**")
+        else:
+            st.markdown(f"**{paper['title']}**")
         st.markdown(f"*{paper.get('authors', '')}*")
         st.markdown(f"`{paper.get('categories', 'N/A')}` - Score: `{float(paper.get('score', 0)):.4f}`")
         st.markdown(paper["abstract"][:500] + "...\n")
@@ -69,7 +73,7 @@ def render_results(results):
         if paper.get("groundedness"):
             st.markdown(f"**Agent verdict:** {paper['groundedness']}")
         if "link_verified" in paper:
-            status = "Valid" if paper["link_verified"] else "Broken"
+            status = "Valid" if paper["link_verified"] else "Unavailable"
             st.markdown(f"**Link check:** {status}")
         st.markdown("---")
 
